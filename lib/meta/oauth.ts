@@ -5,10 +5,8 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "crypto";
-import { getEncryptionKeyHex, requireEnv } from "@/lib/env";
+import { getEncryptionKeyHex, getMetaGraphApiVersion, requireEnv } from "@/lib/env";
 
-const INSTAGRAM_OAUTH_URL = "https://www.instagram.com/oauth/authorize";
-const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
@@ -71,46 +69,48 @@ export function verifyOAuthState(state: string | null): OAuthStatePayload | null
 
 export function getAuthorizationUrl(redirectUri: string, state: string): string {
   const params = new URLSearchParams({
-    client_id: requireEnv("INSTAGRAM_APP_ID"),
+    client_id: requireEnv("META_APP_ID"),
     redirect_uri: redirectUri,
-    scope:
-      "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_manage_insights",
-    response_type: "code",
     state,
+    config_id: requireEnv("META_LOGIN_CONFIG_ID"),
+    response_type: "code",
+    override_default_response_type: "true",
   });
 
-  return `${INSTAGRAM_OAUTH_URL}?${params.toString()}`;
+  return `https://www.facebook.com/${getMetaGraphApiVersion()}/dialog/oauth?${params.toString()}`;
 }
 
 export async function exchangeCodeForToken(
   code: string,
   redirectUri: string
-): Promise<{ accessToken: string; userId: string }> {
-  const body = new URLSearchParams({
-    client_id: requireEnv("INSTAGRAM_APP_ID"),
-    client_secret: requireEnv("INSTAGRAM_APP_SECRET"),
-    grant_type: "authorization_code",
+): Promise<{ accessToken: string; expiresIn: number | null }> {
+  const params = new URLSearchParams({
+    client_id: requireEnv("META_APP_ID"),
+    client_secret: requireEnv("FACEBOOK_APP_SECRET"),
     redirect_uri: redirectUri,
     code,
   });
 
-  const response = await fetch(INSTAGRAM_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  const response = await fetch(
+    `https://graph.facebook.com/${getMetaGraphApiVersion()}/oauth/access_token?${params.toString()}`
+  );
 
   if (!response.ok) {
-    const error = await response.json();
+    let error: any;
+    try {
+      error = await response.json();
+    } catch {
+      error = null;
+    }
     throw new Error(
-      `Token exchange failed: ${error.error_message || JSON.stringify(error)}`
+      `Token exchange failed: ${error?.error?.message ?? JSON.stringify(error)}`
     );
   }
 
   const data = await response.json();
   return {
     accessToken: data.access_token,
-    userId: String(data.user_id),
+    expiresIn: data.expires_in ?? null,
   };
 }
 

@@ -1,7 +1,10 @@
-import { getMetaGraphApiVersion, requireEnv } from "@/lib/env";
+import { getMetaGraphApiVersion } from "@/lib/env";
 
+// Unified Login (Facebook Login for Business) apps call graph.facebook.com with a
+// Business Integration System User token and address the Instagram professional
+// account by its ID. The name is kept so every existing call site is unchanged.
 function instagramGraphBase() {
-  return `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
+  return `https://graph.facebook.com/${getMetaGraphApiVersion()}`;
 }
 
 function facebookGraphBase() {
@@ -575,16 +578,55 @@ export async function getConversationMessages(
   return data.messages?.data ?? [];
 }
 
+// With a system-user token, /me is the system user, not the Instagram account.
+// The connected Instagram account ID comes from /me/assigned_instagram_accounts.
+const instagramAccountIdCache = new Map<string, string>();
+const INSTAGRAM_ACCOUNT_ID_CACHE_MAX = 200;
+
+export async function resolveInstagramAccountId(
+  accessToken: string
+): Promise<string> {
+  const cached = instagramAccountIdCache.get(accessToken);
+  if (cached) return cached;
+
+  const url = new URL(`${instagramGraphBase()}/me/assigned_instagram_accounts`);
+  url.searchParams.set("fields", "id,username,name");
+  url.searchParams.set("access_token", accessToken);
+
+  const response = await fetch(url.toString());
+  const data = await handleResponse<{ data?: { id: string }[] }>(response);
+  const id = data.data?.[0]?.id;
+  if (!id) {
+    throw new MetaApiError(
+      100,
+      undefined,
+      undefined,
+      "No Instagram account is assigned to this token"
+    );
+  }
+
+  if (instagramAccountIdCache.size >= INSTAGRAM_ACCOUNT_ID_CACHE_MAX) {
+    const oldest = instagramAccountIdCache.keys().next().value;
+    if (oldest !== undefined) instagramAccountIdCache.delete(oldest);
+  }
+  instagramAccountIdCache.set(accessToken, id);
+  return id;
+}
+
 export async function getUserInfo(accessToken: string): Promise<InstagramUser> {
-  const url = new URL(`${instagramGraphBase()}/me`);
+  const igId = await resolveInstagramAccountId(accessToken);
+  const url = new URL(`${instagramGraphBase()}/${igId}`);
   url.searchParams.set(
     "fields",
-    "id,user_id,username,name,profile_picture_url,followers_count"
+    "id,username,name,profile_picture_url,followers_count"
   );
   url.searchParams.set("access_token", accessToken);
 
   const response = await fetch(url.toString());
-  return handleResponse<InstagramUser>(response);
+  const user = await handleResponse<InstagramUser>(response);
+  // The professional account ID is the ID itself under Unified Login; keep
+  // user_id populated because webhooks and callers key off it.
+  return { ...user, user_id: user.id };
 }
 
 const MEDIA_FIELDS =
@@ -605,7 +647,8 @@ export async function getUserMedia(
   accessToken: string,
   limit = 25
 ): Promise<InstagramMedia[]> {
-  const url = new URL(`${instagramGraphBase()}/me/media`);
+  const igId = await resolveInstagramAccountId(accessToken);
+  const url = new URL(`${instagramGraphBase()}/${igId}/media`);
   url.searchParams.set("fields", MEDIA_FIELDS);
   url.searchParams.set("limit", limit.toString());
   url.searchParams.set("access_token", accessToken);
@@ -628,7 +671,8 @@ export async function getAllUserMedia(
 ): Promise<InstagramMedia[]> {
   const results: InstagramMedia[] = [];
 
-  const first = new URL(`${instagramGraphBase()}/me/media`);
+  const igId = await resolveInstagramAccountId(accessToken);
+  const first = new URL(`${instagramGraphBase()}/${igId}/media`);
   first.searchParams.set("fields", fields);
   first.searchParams.set("limit", String(Math.min(MEDIA_PAGE_SIZE, max)));
   first.searchParams.set("access_token", accessToken);
@@ -750,34 +794,17 @@ export async function getFollowerCountSeries(
 export async function getLongLivedToken(
   shortLivedToken: string
 ): Promise<{ accessToken: string; expiresIn: number }> {
-  const url = new URL(`${instagramGraphBase()}/access_token`);
-  url.searchParams.set("grant_type", "ig_exchange_token");
-  url.searchParams.set("client_secret", requireEnv("INSTAGRAM_APP_SECRET"));
-  url.searchParams.set("access_token", shortLivedToken);
-
-  const response = await fetch(url.toString());
-  const data = await handleResponse<TokenResponse>(response);
-
-  return {
-    accessToken: data.access_token,
-    expiresIn: data.expires_in ?? 5184000,
-  };
+  // System-user tokens (Unified Login) are not exchanged for a long-lived token;
+  // the token from the code exchange is used as is. Signature kept for callers.
+  return { accessToken: shortLivedToken, expiresIn: 5184000 };
 }
 
 export async function refreshLongLivedToken(
   longLivedToken: string
 ): Promise<{ accessToken: string; expiresIn: number }> {
-  const url = new URL(`${instagramGraphBase()}/refresh_access_token`);
-  url.searchParams.set("grant_type", "ig_refresh_token");
-  url.searchParams.set("access_token", longLivedToken);
-
-  const response = await fetch(url.toString());
-  const data = await handleResponse<TokenResponse>(response);
-
-  return {
-    accessToken: data.access_token,
-    expiresIn: data.expires_in ?? 5184000,
-  };
+  // System-user tokens are managed by Meta's token management API, not refreshed
+  // with ig_refresh_token. Return the token unchanged. Signature kept for callers.
+  return { accessToken: longLivedToken, expiresIn: 5184000 };
 }
 
 export async function subscribeInstagramAccountToWebhooks(
