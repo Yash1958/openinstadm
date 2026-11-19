@@ -30,8 +30,9 @@ export function getEncryptionKeyHex(): string {
 // start. Checked up front so a self-hoster with a half-filled .env gets the
 // variable names back instead of an unhandled throw from requireEnv().
 const INSTAGRAM_OAUTH_ENV = [
-  "INSTAGRAM_APP_ID",
-  "INSTAGRAM_APP_SECRET",
+  "META_APP_ID",
+  "META_LOGIN_CONFIG_ID",
+  "FACEBOOK_APP_SECRET",
   "ENCRYPTION_KEY",
   "NEXTAUTH_SECRET",
 ] as const;
@@ -41,7 +42,7 @@ export function getMissingInstagramOAuthEnv(): string[] {
     const value = process.env[name];
     if (!value) return true;
     // A malformed key fails later inside encryptToken, after the user has
-    // already round-tripped through Meta — catch the bad format here instead.
+    // already round-tripped through Meta â€” catch the bad format here instead.
     return name === "ENCRYPTION_KEY" && !HEX_32_BYTE.test(value);
   });
 }
@@ -63,8 +64,8 @@ export const serverEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   ENCRYPTION_KEY: z.string().regex(HEX_32_BYTE),
-  INSTAGRAM_APP_ID: z.string().min(1),
-  INSTAGRAM_APP_SECRET: z.string().min(1),
+  META_APP_ID: z.string().min(1),
+  META_LOGIN_CONFIG_ID: z.string().min(1),
   FACEBOOK_APP_SECRET: z.string().min(1),
   WEBHOOK_VERIFY_TOKEN: z.string().min(1),
 });
