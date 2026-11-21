@@ -1,6 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { getDMQueue } from "@/lib/queue/client";
+import {
+  getDMQueue,
+  MESSAGE_JOB_NAME,
+  POSTBACK_JOB_NAME,
+  type DmQueueJob,
+} from "@/lib/queue/client";
+import { isServerlessMode } from "@/lib/runtime-mode";
+import { runDmJobInline } from "@/lib/queue/dm-worker";
 import {
   parseCommentEvents,
   parseMessageEvents,
@@ -9,9 +16,10 @@ import {
   parseReadEvents,
   verifyWebhookSignature,
 } from "@/lib/meta/webhook";
-import { MESSAGE_JOB_NAME, POSTBACK_JOB_NAME } from "@/lib/queue/client";
 import { Prisma } from "@/app/generated/prisma/client";
 import { recordMessagingInteraction } from "@/lib/meta/messaging-window";
+
+export const maxDuration = 60;
 
 const OPENING_DM_READ_FALLBACK_DELAY_MS = 5 * 60 * 1000;
 
@@ -116,7 +124,25 @@ export async function POST(request: NextRequest) {
     const commentEvents = parseCommentEvents(
       payload as Parameters<typeof parseCommentEvents>[0]
     );
-    const queue = getDMQueue();
+    const serverless = isServerlessMode();
+    const queue = serverless ? null : getDMQueue();
+    const inlineTasks: Array<{ name: string; data: DmQueueJob; id: string }> = [];
+
+    const dispatchJob = async (
+      name: string,
+      data: DmQueueJob,
+      opts: { jobId: string; delay?: number }
+    ) => {
+      if (serverless) {
+        // Delayed read-fallback jobs are skipped in serverless mode; immediate
+        // comment, postback, and inbound DM jobs run in Vercel `after()`.
+        if (!opts.delay) {
+          inlineTasks.push({ name, data, id: opts.jobId });
+        }
+        return;
+      }
+      await queue!.add(name, data, opts);
+    };
 
     const commentAccountIds = [
       ...new Set(commentEvents.map((e) => e.instagramAccountId)),
@@ -134,7 +160,7 @@ export async function POST(request: NextRequest) {
 
     let webhookWorkspaceId: string | null = null;
     for (const event of commentEvents) {
-      await queue.add(
+      await dispatchJob(
         "process-comment",
         {
           instagramAccountId: event.instagramAccountId,
@@ -162,7 +188,7 @@ export async function POST(request: NextRequest) {
     );
 
     for (const event of postbackEvents) {
-      await queue.add(
+      await dispatchJob(
         POSTBACK_JOB_NAME,
         {
           instagramAccountId: event.instagramAccountId,
@@ -209,7 +235,7 @@ export async function POST(request: NextRequest) {
 
     for (const event of messageEvents) {
       console.log(`[Webhook] Queuing MESSAGE_JOB for: instagramAccountId=${event.instagramAccountId}, messageId=${event.messageId}`);
-      await queue.add(
+      await dispatchJob(
         MESSAGE_JOB_NAME,
         {
           instagramAccountId: event.instagramAccountId,
@@ -298,7 +324,7 @@ export async function POST(request: NextRequest) {
       for (const event of events) {
         const scheduled = scheduledByUser.get(event.userId) ?? new Set();
         for (const automationId of scheduled) {
-          await queue.add(
+          await dispatchJob(
             POSTBACK_JOB_NAME,
             {
               instagramAccountId: igAccountId,
@@ -327,6 +353,14 @@ export async function POST(request: NextRequest) {
     console.log(`[Webhook] === WEBHOOK PROCESSED SUCCESSFULLY ===`);
     console.log(`[Webhook] WebhookEvent id: ${webhookEvent.id}`);
     console.log(`[Webhook] Workspace ID: ${webhookWorkspaceId || 'none'}`);
+
+    if (serverless && inlineTasks.length > 0) {
+      after(async () => {
+        for (const task of inlineTasks) {
+          await runDmJobInline(task.name, task.data, task.id);
+        }
+      });
+    }
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

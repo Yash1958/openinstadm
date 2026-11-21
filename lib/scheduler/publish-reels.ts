@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db/client";
 import { decryptToken } from "@/lib/meta/oauth";
 import {
   createReelContainer,
+  getContainerStatus,
   getMediaPermalink,
   publishContainer,
   waitForContainerReady,
@@ -219,4 +220,192 @@ export async function processDueReels(now = new Date()) {
     results[outcome] += 1;
   }
   return results;
+}
+
+/**
+ * Serverless-safe 2-step reel publisher for Vercel cron routes (always completes
+ * in a few seconds, well inside Vercel's 60s function limit):
+ *
+ *   Tick 1 (SCHEDULED -> PUBLISHING): creates the IG REELS container from a signed
+ *     R2 URL and persists `containerId`. If Instagram finishes immediately, finishes
+ *     publishing on the same tick; otherwise returns `queued` and waits for Tick 2.
+ *   Tick 2 (PUBLISHING + containerId): polls `getContainerStatus()` once. When
+ *     FINISHED, publishes the container, creates the LINK + /p/ bridge + public-reply
+ *     campaign, deletes the R2 object, and marks PUBLISHED.
+ *   Safety: rows stuck in PUBLISHING > 30 min are marked FAILED and never retried.
+ */
+export async function processDueReelsServerless(now = new Date()) {
+  const stuckFailed = await failStuckReels(now);
+  const results = {
+    started: 0,
+    stillProcessing: 0,
+    published: 0,
+    failed: stuckFailed,
+  };
+
+  // Phase A: Advance any in-flight PUBLISHING containers (has containerId, no mediaId yet).
+  const inFlight = await prisma.scheduledReel.findMany({
+    where: {
+      status: "PUBLISHING",
+      containerId: { not: null },
+      mediaId: null,
+    },
+    include: { instagramAccount: true },
+    orderBy: { scheduledAt: "asc" },
+    take: MAX_DUE_PER_RUN,
+  });
+
+  for (const reel of inFlight) {
+    const outcome = await finalizeContainerIfReady(reel);
+    results[outcome] += 1;
+  }
+
+  // Phase B: Start any newly due SCHEDULED reels (create IG container only).
+  const due = await prisma.scheduledReel.findMany({
+    where: { status: "SCHEDULED", scheduledAt: { lte: now } },
+    orderBy: { scheduledAt: "asc" },
+    take: MAX_DUE_PER_RUN,
+    select: { id: true },
+  });
+
+  for (const { id } of due) {
+    const claimed = await prisma.scheduledReel.updateMany({
+      where: { id, status: "SCHEDULED" },
+      data: { status: "PUBLISHING", attempts: { increment: 1 }, error: null },
+    });
+    if (claimed.count === 0) continue;
+
+    const reel = await prisma.scheduledReel.findUniqueOrThrow({
+      where: { id },
+      include: { instagramAccount: true },
+    });
+
+    try {
+      const token = decryptToken(reel.instagramAccount.accessToken);
+      const videoUrl = await getSignedReelUrl(reel.r2Key);
+      const containerId = await createReelContainer({
+        accessToken: token,
+        videoUrl,
+        caption: reel.caption,
+        instagramId: reel.instagramAccount.instagramId,
+      });
+      await prisma.scheduledReel.update({
+        where: { id: reel.id },
+        data: { containerId },
+      });
+      results.started += 1;
+
+      // Best-effort instant check: small videos occasionally finish immediately.
+      const quick = await finalizeContainerIfReady({ ...reel, containerId });
+      if (quick === "published") results.published += 1;
+      else if (quick === "failed") results.failed += 1;
+    } catch (error) {
+      await prisma.scheduledReel.update({
+        where: { id: reel.id },
+        data: { status: "FAILED", error: errorMessage(error).slice(0, 1000) },
+      });
+      results.failed += 1;
+    }
+  }
+
+  return results;
+}
+
+async function finalizeContainerIfReady(reel: {
+  id: string;
+  workspaceId: string;
+  instagramAccountId: string;
+  name: string;
+  r2Key: string;
+  keyword: string;
+  dmMessage: string;
+  destinationUrl: string;
+  linkButtonLabel: string;
+  publicReplyEnabled: boolean;
+  publicReplyMessages: string[];
+  bridgeEnabled: boolean;
+  productTitle: string | null;
+  productPrice: string | null;
+  productRating: string | null;
+  productImageUrl: string | null;
+  containerId: string | null;
+  instagramAccount: { instagramId: string; accessToken: string };
+}): Promise<"published" | "stillProcessing" | "failed"> {
+  if (!reel.containerId) return "failed";
+  try {
+    const token = decryptToken(reel.instagramAccount.accessToken);
+    const { statusCode, status } = await getContainerStatus(token, reel.containerId);
+
+    if (statusCode === "ERROR" || statusCode === "EXPIRED") {
+      await prisma.scheduledReel.update({
+        where: { id: reel.id },
+        data: {
+          status: "FAILED",
+          error: `Instagram could not process the video (${statusCode}${status ? `: ${status}` : ""})`,
+        },
+      });
+      return "failed";
+    }
+
+    if (statusCode !== "FINISHED" && statusCode !== "PUBLISHED") {
+      return "stillProcessing";
+    }
+
+    const mediaId = await publishContainer(
+      token,
+      reel.containerId,
+      fetch,
+      reel.instagramAccount.instagramId
+    );
+    await prisma.scheduledReel.update({
+      where: { id: reel.id },
+      data: { mediaId },
+    });
+
+    let permalink: string | null = null;
+    try {
+      permalink = await getMediaPermalink(token, mediaId);
+    } catch {
+      // Permalink is cosmetic.
+    }
+
+    let automationId: string | null = null;
+    let followUpError: string | null = null;
+    try {
+      automationId = await createCampaignForReel(reel, mediaId, permalink);
+    } catch (error) {
+      followUpError = `Posted, but the campaign was not created: ${errorMessage(error)}`;
+    }
+
+    try {
+      await deleteReelObject(reel.r2Key);
+    } catch (error) {
+      console.error("[scheduler] could not delete video from R2", reel.r2Key, errorMessage(error));
+    }
+
+    await prisma.scheduledReel.update({
+      where: { id: reel.id },
+      data: {
+        status: followUpError ? "FAILED" : "PUBLISHED",
+        permalink,
+        automationId,
+        publishedAt: new Date(),
+        error: followUpError,
+      },
+    });
+    return followUpError ? "failed" : "published";
+  } catch (error) {
+    const current = await prisma.scheduledReel.findUnique({
+      where: { id: reel.id },
+      select: { mediaId: true },
+    });
+    const prefix = current?.mediaId
+      ? `Posted (media ${current.mediaId}) but a later step failed: `
+      : "";
+    await prisma.scheduledReel.update({
+      where: { id: reel.id },
+      data: { status: "FAILED", error: `${prefix}${errorMessage(error)}`.slice(0, 1000) },
+    });
+    return "failed";
+  }
 }

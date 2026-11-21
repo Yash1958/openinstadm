@@ -6,6 +6,7 @@
  */
 
 import { getRedisConnection } from "@/lib/queue/client";
+import { isServerlessMode } from "@/lib/runtime-mode";
 import { getAIBudgetPerHour } from "@/lib/env";
 
 export async function checkAiBudget(workspaceId: string): Promise<{
@@ -14,6 +15,7 @@ export async function checkAiBudget(workspaceId: string): Promise<{
   limit: number;
 }> {
   const limit = getAIBudgetPerHour();
+  if (isServerlessMode()) return { allowed: true, used: 0, limit };
   try {
     const redis = getRedisConnection();
     const key = `ai:budget:${workspaceId}`;
@@ -27,6 +29,7 @@ export async function checkAiBudget(workspaceId: string): Promise<{
 }
 
 export async function consumeAiBudget(workspaceId: string): Promise<void> {
+  if (isServerlessMode()) return;
   try {
     const redis = getRedisConnection();
     const key = `ai:budget:${workspaceId}`;

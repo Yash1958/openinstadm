@@ -27,6 +27,8 @@
 
 import { prisma } from "@/lib/db/client";
 import { getDMQueue } from "@/lib/queue/client";
+import { isServerlessMode } from "@/lib/runtime-mode";
+import { runDmJobInline } from "@/lib/queue/dm-worker";
 import {
   getRecentMediaComments,
   getUserMedia,
@@ -168,7 +170,8 @@ async function sweepCampaign(
   }
   if (mediaIds.length === 0) return stat;
 
-  const queue = getDMQueue();
+  const serverless = isServerlessMode();
+  const queue = serverless ? null : getDMQueue();
 
   for (const mediaId of mediaIds) {
     let comments: InstagramComment[];
@@ -233,7 +236,7 @@ async function sweepCampaign(
       // drop this add, so the comment would never be retried. Dedup is handled
       // above (owner-reply + DmLog guards) and the worker is idempotent
       // (publicReplySentAt / SENT), so re-processing a comment is safe.
-      await queue.add("process-comment", {
+      const jobPayload = {
         instagramAccountId: account.instagramId,
         commentId: c.id,
         commentText: c.text ?? "",
@@ -244,8 +247,13 @@ async function sweepCampaign(
           automation.postId && mediaId !== automation.postId
             ? automation.postId
             : undefined,
-        source: "POLLING",
-      });
+        source: "POLLING" as const,
+      };
+      if (serverless) {
+        await runDmJobInline("process-comment", jobPayload, `poll_${account.instagramId}_${c.id}`);
+      } else {
+        await queue!.add("process-comment", jobPayload);
+      }
       stat.enqueued += 1;
     }
   }

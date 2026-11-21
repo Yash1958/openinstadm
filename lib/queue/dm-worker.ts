@@ -11,6 +11,7 @@ import {
   type ProcessPostbackJob,
   type ProcessFollowUpJob,
 } from "./client";
+import { isServerlessMode } from "@/lib/runtime-mode";
 import { prisma } from "@/lib/db/client";
 import {
   MetaApiError,
@@ -737,7 +738,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       if (
         directLinkDelivered &&
         automation.followUpEnabled &&
-        automation.followUpMessage?.trim()
+        automation.followUpMessage?.trim() &&
+        !isServerlessMode()
       ) {
         const delayMs =
           Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000;
@@ -1780,6 +1782,28 @@ async function processJob(job: Job<DmQueueJob>): Promise<void> {
     return processMessage(job as Job<ProcessMessageJob>);
   }
   return processComment(job as Job<ProcessCommentJob>);
+}
+
+/**
+ * Serverless execution path (Vercel webhook `after()` / cron). Runs the exact
+ * same comment/postback/message processor directly in-process without Redis or BullMQ.
+ */
+export async function runDmJobInline(
+  name: string,
+  data: DmQueueJob,
+  id = `inline_${Date.now()}`
+): Promise<void> {
+  const fakeJob = {
+    id,
+    name,
+    data,
+    attemptsMade: 0,
+  } as Job<DmQueueJob>;
+  try {
+    await processJob(fakeJob);
+  } catch (error) {
+    console.error(`[DM Serverless] Inline job ${id} (${name}) failed:`, formatError(error));
+  }
 }
 
 async function recordWorkerFailure(

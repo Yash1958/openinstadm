@@ -15,6 +15,19 @@
  */
 
 import Redis from "ioredis";
+import { prisma } from "@/lib/db/client";
+import { isServerlessMode as isServerlessRateLimit } from "@/lib/runtime-mode";
+
+async function countRecentDMsInDb(instagramAccountId: string): Promise<number> {
+  const since = new Date(Date.now() - RATE_LIMIT_WINDOW * 1000);
+  return prisma.dmLog.count({
+    where: {
+      instagramAccount: { instagramId: instagramAccountId },
+      status: { in: ["SENT", "PENDING"] },
+      createdAt: { gte: since },
+    },
+  });
+}
 
 const RATE_LIMIT_MAX = 750; // private replies per hour, per Meta's documented cap
 const RATE_LIMIT_WINDOW = 3600; // 1 hour in seconds
@@ -106,11 +119,15 @@ export async function checkRateLimit(
   instagramAccountId: string,
   requeueAttempt: number = 0
 ): Promise<RateLimitResult> {
-  const client = getRedis();
-  const key = `rate:dm:${instagramAccountId}`;
-
-  const currentCount = await client.get(key);
-  const count = currentCount ? parseInt(currentCount, 10) : 0;
+  let count: number;
+  if (isServerlessRateLimit()) {
+    count = await countRecentDMsInDb(instagramAccountId);
+  } else {
+    const client = getRedis();
+    const key = `rate:dm:${instagramAccountId}`;
+    const currentCount = await client.get(key);
+    count = currentCount ? parseInt(currentCount, 10) : 0;
+  }
 
   if (count >= RATE_LIMIT_MAX) {
     // Over the limit
@@ -158,6 +175,30 @@ export async function reserveDMSlot(
   instagramAccountId: string,
   requeueAttempt: number = 0
 ): Promise<RateLimitResult> {
+  if (isServerlessRateLimit()) {
+    const count = await countRecentDMsInDb(instagramAccountId);
+    if (count >= RATE_LIMIT_MAX) {
+      return {
+        allowed: false,
+        currentCount: count,
+        remainingDMs: 0,
+        shouldRequeue: false,
+        requeueDelayMs: 0,
+        shouldSkip: true,
+        reserved: false,
+      };
+    }
+    return {
+      allowed: true,
+      currentCount: count + 1,
+      remainingDMs: Math.max(0, RATE_LIMIT_MAX - (count + 1)),
+      shouldRequeue: false,
+      requeueDelayMs: 0,
+      shouldSkip: false,
+      reserved: true,
+    };
+  }
+
   const client = getRedis();
   const key = `rate:dm:${instagramAccountId}`;
 

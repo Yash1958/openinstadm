@@ -62,7 +62,7 @@ export const serverEnvSchema = z.object({
   NEXTAUTH_URL: z.string().url(),
   NEXTAUTH_SECRET: z.string().min(16),
   DATABASE_URL: z.string().min(1),
-  REDIS_URL: z.string().min(1),
+  REDIS_URL: z.string().min(1).optional(),
   ENCRYPTION_KEY: z.string().regex(HEX_32_BYTE),
   META_APP_ID: z.string().min(1),
   META_LOGIN_CONFIG_ID: z.string().min(1),

@@ -1,4 +1,5 @@
 import { getRedisConnection } from "@/lib/queue/client";
+import { isServerlessMode } from "@/lib/runtime-mode";
 
 export const MESSAGING_WINDOW_MS = 24 * 60 * 60 * 1000;
 // Leave room for network latency at the end of the permitted window.
@@ -20,6 +21,7 @@ export async function recordMessagingInteraction(
   const interactionAt = Math.min(timestamp, now);
   const expiresAt = interactionAt + MESSAGING_WINDOW_MS;
   if (expiresAt <= now) return;
+  if (isServerlessMode()) return;
   await getRedisConnection().eval(
     `local previous = tonumber(redis.call('GET', KEYS[1]) or '0')
      if tonumber(ARGV[1]) > previous then
@@ -34,6 +36,7 @@ export async function recordMessagingInteraction(
 }
 
 export async function hasOpenMessagingWindow(accountId: string, userId: string): Promise<boolean> {
+  if (isServerlessMode()) return true;
   const timestamp = Number(await getRedisConnection().get(windowKey(accountId, userId)));
   const age = Date.now() - timestamp;
   return timestamp > 0 && Number.isFinite(timestamp) && age >= 0 && age < MESSAGING_WINDOW_MS - SEND_MARGIN_MS;

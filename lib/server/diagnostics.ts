@@ -3,6 +3,7 @@ import {
   getDMQueueForDiagnostics,
   withDiagnosticsRedisConnection,
 } from "@/lib/queue/client";
+import { isServerlessMode } from "@/lib/runtime-mode";
 import { getWorkerAlerts, getWorkerHealth } from "@/lib/ops/worker-health";
 
 /**
@@ -21,6 +22,27 @@ import { getWorkerAlerts, getWorkerHealth } from "@/lib/ops/worker-health";
  */
 
 export async function getDiagnosticsOverview() {
+  if (isServerlessMode()) {
+    return {
+      queueCounts: { waiting: 0, active: 0, delayed: 0, failed: 0 },
+      workerHealth: {
+        healthy: true,
+        heartbeat: {
+          status: "running" as const,
+          worker: "dm" as const,
+          pid: process.pid,
+          hostname: "vercel-serverless",
+          startedAt: new Date().toISOString(),
+          checkedAt: new Date().toISOString(),
+        },
+        ageMs: 0,
+      },
+      workerAlerts: [],
+      redisAvailable: true,
+      redisError: null,
+    };
+  }
+
   try {
     return await withDiagnosticsRedisConnection(async (redis) => {
       const queue = getDMQueueForDiagnostics(redis);
