@@ -3,12 +3,30 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+function normalizeDatabaseUrl(raw: string | undefined): string | undefined {
+  if (!raw) return raw;
+  try {
+    const u = new URL(raw);
+    if (
+      u.hostname.endsWith(".supabase.com") &&
+      u.searchParams.get("sslmode") === "require" &&
+      !u.searchParams.has("uselibpqcompat")
+    ) {
+      u.searchParams.set("uselibpqcompat", "true");
+      return u.toString();
+    }
+  } catch {
+    // Keep original string if not a standard URL
+  }
+  return raw;
+}
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: normalizeDatabaseUrl(process.env["DATABASE_URL"]),
   },
 });

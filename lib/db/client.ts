@@ -5,11 +5,29 @@ const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
 };
 
+function normalizeDatabaseUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (
+      u.hostname.endsWith(".supabase.com") &&
+      u.searchParams.get("sslmode") === "require" &&
+      !u.searchParams.has("uselibpqcompat")
+    ) {
+      u.searchParams.set("uselibpqcompat", "true");
+      return u.toString();
+    }
+  } catch {
+    // Leave untouched if unparseable
+  }
+  return raw;
+}
+
 function createPrismaClient() {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
+  const rawDatabaseUrl = process.env.DATABASE_URL;
+  if (!rawDatabaseUrl) {
     throw new Error("DATABASE_URL environment variable is required");
   }
+  const databaseUrl = normalizeDatabaseUrl(rawDatabaseUrl);
 
   // Worker has a single serial reconciler + at most 5 concurrent jobs, so it
   // needs far fewer connections than the web dashboard. Small pools + a fast
