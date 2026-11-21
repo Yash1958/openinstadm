@@ -4,6 +4,7 @@ loadEnv();
 import { createDMWorker } from "@/lib/queue/dm-worker";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
+import { processDueReels } from "@/lib/scheduler/publish-reels";
 import os from "node:os";
 
 const worker = createDMWorker();
@@ -69,9 +70,33 @@ if (!POLL_DISABLED) {
   console.log("[DM Worker] Comment polling disabled — webhook-only mode");
 }
 
+// Scheduled reels: publish anything that is due, once a minute. The job is
+// idempotent (rows are claimed atomically) so overlapping runs are harmless.
+const REEL_INTERVAL_MS = 60_000;
+let reelRunning = false;
+
+async function runReelScheduler() {
+  if (reelRunning) return;
+  reelRunning = true;
+  try {
+    const result = await processDueReels();
+    if (result.published || result.failed) {
+      console.log("[DM Worker] Scheduled reels:", JSON.stringify(result));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[DM Worker] Reel scheduler failed:", message);
+  } finally {
+    reelRunning = false;
+  }
+}
+
+const reelTimer = setInterval(() => void runReelScheduler(), REEL_INTERVAL_MS);
+
 async function shutdown(signal: string) {
   console.log(`[DM Worker] ${signal} received, closing worker`);
   clearInterval(heartbeatTimer);
+  clearInterval(reelTimer);
   if (pollTimer) clearTimeout(pollTimer);
   await worker.close();
   process.exit(0);

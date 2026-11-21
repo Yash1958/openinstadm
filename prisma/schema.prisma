@@ -75,6 +75,7 @@ model Workspace {
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
   apiSnapshots      ApiSnapshot[]
+  scheduledReels    ScheduledReel[]
 
   @@index([ownerId])
 }
@@ -151,8 +152,55 @@ model InstagramAccount {
   linkClicks        LinkClick[]
   followerSnapshots FollowerSnapshot[]
   apiSnapshots      ApiSnapshot[]
+  scheduledReels    ScheduledReel[]
 
   @@index([workspaceId])
+}
+
+enum ScheduledReelStatus {
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+/// A reel waiting in the private R2 bucket to be published at `scheduledAt`.
+/// The worker publishes it through the Instagram Graph API and then creates the
+/// comment-to-DM campaign on the exact media id that Instagram returns.
+model ScheduledReel {
+  id                 String              @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+  name               String
+  /// Object key inside the R2 bucket (never a public URL).
+  r2Key              String
+  caption            String
+  scheduledAt        DateTime
+  status             ScheduledReelStatus @default(SCHEDULED)
+
+  /// Campaign settings applied right after the reel is published.
+  keyword            String              @default("LINK")
+  dmMessage          String
+  destinationUrl     String
+  linkButtonLabel    String              @default("Open link")
+
+  containerId        String?
+  mediaId            String?
+  permalink          String?
+  automationId       String?
+  error              String?
+  attempts           Int                 @default(0)
+  publishedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([workspaceId, scheduledAt])
 }
 
 /// Durable API response snapshots for expensive external reads. These rows are

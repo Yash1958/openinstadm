@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  CalendarCheck,
   CaretUpDown,
   ChartLine,
   ChatCircle,
@@ -60,6 +61,7 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
     label: "Automation",
     items: [
       { label: "Campaigns", href: "/campaigns", icon: Megaphone },
+      { label: "Scheduler", href: "/scheduler", icon: CalendarCheck },
       { label: "Inbox Automations", href: "/inbox-automations", icon: Robot },
       { label: "DM Logs", href: "/logs", icon: ListDashes },
     ],
