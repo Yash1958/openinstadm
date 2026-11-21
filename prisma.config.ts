@@ -7,16 +7,20 @@ function normalizeDatabaseUrl(raw: string | undefined): string | undefined {
   if (!raw) return raw;
   try {
     const u = new URL(raw);
-    if (
-      u.hostname.endsWith(".supabase.com") &&
-      u.searchParams.get("sslmode") === "require" &&
-      !u.searchParams.has("uselibpqcompat")
-    ) {
-      u.searchParams.set("uselibpqcompat", "true");
+    if (u.hostname.endsWith(".supabase.com")) {
+      // Supabase Supavisor pooler uses a pooler cert chain that both Prisma's
+      // Rust engine on Vercel Linux and pg v8.23 reject under strict verify-full.
+      u.searchParams.set("sslmode", "no-verify");
+      if (!u.searchParams.has("connect_timeout")) {
+        u.searchParams.set("connect_timeout", "30");
+      }
+      console.log(
+        `[prisma.config] Supabase target: ${u.hostname}:${u.port || "5432"} params=${[...u.searchParams.keys()].join(",")}`
+      );
       return u.toString();
     }
   } catch {
-    // Keep original string if not a standard URL
+    console.log("[prisma.config] DATABASE_URL could not be parsed as standard URL (check special chars in password)");
   }
   return raw;
 }
