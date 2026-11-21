@@ -180,10 +180,20 @@ model ScheduledReel {
   status             ScheduledReelStatus @default(SCHEDULED)
 
   /// Campaign settings applied right after the reel is published.
-  keyword            String              @default("LINK")
-  dmMessage          String
-  destinationUrl     String
-  linkButtonLabel    String              @default("Open link")
+  keyword             String              @default("LINK")
+  dmMessage           String
+  destinationUrl      String
+  linkButtonLabel     String              @default("Open link")
+  publicReplyEnabled  Boolean             @default(true)
+  publicReplyMessages String[]            @default([])
+
+  /// Optional product bridge page (/p/<slug>) so DMs link to your own webpage
+  /// instead of a raw affiliate URL (Amazon Associates DM compliance).
+  bridgeEnabled       Boolean             @default(true)
+  productTitle        String?
+  productPrice        String?
+  productRating       String?
+  productImageUrl     String?
 
   containerId        String?
   mediaId            String?
@@ -383,14 +393,20 @@ model InboxAutomation {
 }
 
 model TrackedLink {
-  id             String   @id @default(cuid())
-  workspaceId    String
-  automationId   String
-  slug           String   @unique
-  label          String?
-  destinationUrl String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String   @id @default(cuid())
+  workspaceId     String
+  automationId    String
+  slug            String   @unique
+  label           String?
+  destinationUrl  String
+  bridgeEnabled   Boolean  @default(false)
+  productTitle    String?
+  productPrice    String?
+  productRating   String?
+  productImageUrl String?
+  storeName       String   @default("Amazon")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   automation Automation  @relation(fields: [automationId], references: [id], onDelete: Cascade)

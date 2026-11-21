@@ -1,6 +1,7 @@
 export interface MessageTrackedLink {
   slug: string;
   destinationUrl: string;
+  bridgeEnabled?: boolean;
 }
 
 const URL_PATTERN = /https?:\/\/[^\s<>"')\]]+/i;
@@ -47,7 +48,10 @@ export function renderMessageWithoutLink({
 }) {
   return message
     .replace(/\{username\}/gi, commenterName ?? "there")
+    .replace(/\n[ \t]*\{link\}[ \t]*\n/gi, "\n")
+    .replace(/[ \t]*\{link\}[ \t]*\n/gi, "\n")
     .replace(/\s*\{link\}\s*/gi, " ")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
@@ -59,6 +63,25 @@ export function buildTrackedUrl(slug: string, baseUrl?: string) {
       : process.env.NEXTAUTH_URL ?? "http://localhost:3000");
 
   return `${resolvedBaseUrl.replace(/\/$/, "")}/r/${slug}`;
+}
+
+export function buildBridgeUrl(slug: string, baseUrl?: string) {
+  const resolvedBaseUrl =
+    baseUrl ??
+    (typeof window !== "undefined"
+      ? window.location.origin
+      : process.env.NEXTAUTH_URL ?? "http://localhost:3000");
+
+  return `${resolvedBaseUrl.replace(/\/$/, "")}/p/${slug}`;
+}
+
+export function buildDeliveryUrl(
+  link: Pick<MessageTrackedLink, "slug" | "bridgeEnabled">,
+  baseUrl?: string
+) {
+  return link.bridgeEnabled
+    ? buildBridgeUrl(link.slug, baseUrl)
+    : buildTrackedUrl(link.slug, baseUrl);
 }
 
 export function renderMessageWithTracking({
@@ -77,7 +100,7 @@ export function renderMessageWithTracking({
 
   if (!primaryLink) return rendered;
 
-  const trackedUrl = buildTrackedUrl(primaryLink.slug, baseUrl);
+  const trackedUrl = buildDeliveryUrl(primaryLink, baseUrl);
 
   if (/\{link\}/i.test(rendered)) {
     return rendered.replace(/\{link\}/gi, trackedUrl);

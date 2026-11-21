@@ -36,7 +36,7 @@ import {
 } from "@/lib/billing/usage";
 import { recordWorkerAlert } from "@/lib/ops/worker-health";
 import {
-  buildTrackedUrl,
+  buildDeliveryUrl,
   renderMessageWithTracking,
   renderMessageWithoutLink,
 } from "@/lib/tracking/message";
@@ -81,6 +81,7 @@ type WorkerTrackedLink = {
   slug: string;
   label: string | null;
   destinationUrl: string;
+  bridgeEnabled?: boolean;
 };
 
 /**
@@ -93,7 +94,7 @@ function buildLinkButtons(
   primaryLabel: string | null
 ): { title: string; url: string }[] {
   return trackedLinks.slice(0, 3).map((link, index) => ({
-    url: buildTrackedUrl(link.slug),
+    url: buildDeliveryUrl(link),
     title: (index === 0 ? primaryLabel : link.label) || link.label || "Open link",
   }));
 }
@@ -112,7 +113,7 @@ function buildInlineLinkFallback(
   const base =
     renderMessageWithTracking({ message, commenterName, trackedLinks }) ||
     bodyText;
-  const extraUrls = trackedLinks.slice(1).map((link) => buildTrackedUrl(link.slug));
+  const extraUrls = trackedLinks.slice(1).map((link) => buildDeliveryUrl(link));
   return extraUrls.length > 0 ? `${base}\n${extraUrls.join("\n")}` : base;
 }
 
@@ -237,6 +238,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           slug: true,
           label: true,
           destinationUrl: true,
+          bridgeEnabled: true,
         },
         orderBy: { createdAt: "asc" },
       },
@@ -811,7 +813,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       instagramAccount: true,
       workspace: true,
       trackedLinks: {
-        select: { slug: true, label: true, destinationUrl: true },
+        select: { slug: true, label: true, destinationUrl: true, bridgeEnabled: true },
         orderBy: { createdAt: "asc" },
       },
     },
@@ -1105,7 +1107,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       instagramAccount: true,
       workspace: true,
       trackedLinks: {
-        select: { slug: true, label: true, destinationUrl: true },
+        select: { slug: true, label: true, destinationUrl: true, bridgeEnabled: true },
         orderBy: { createdAt: "asc" },
       },
     },

@@ -24,7 +24,7 @@ interface ScheduledReelRow {
 }
 
 const DEFAULT_DM =
-  "Hey {username}! Here is the link you asked for: {link}\nAffiliate link: I may earn a small commission at no extra cost to you.";
+  "Hey {username}! Tap below for the product link.\n{link}\nAffiliate link: I may earn a small commission at no extra cost to you.";
 
 function formatWhen(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -50,6 +50,10 @@ export default function SchedulerPage() {
   const [keyword, setKeyword] = useState("LINK");
   const [destinationUrl, setDestinationUrl] = useState("");
   const [dmMessage, setDmMessage] = useState(DEFAULT_DM);
+  const [publicReplyEnabled, setPublicReplyEnabled] = useState(true);
+  const [bridgeEnabled, setBridgeEnabled] = useState(true);
+  const [productPrice, setProductPrice] = useState("");
+  const [productRating, setProductRating] = useState("");
 
   const load = useCallback(async () => {
     const [list, bucket] = await Promise.all([
@@ -89,6 +93,11 @@ export default function SchedulerPage() {
           keyword,
           dmMessage,
           destinationUrl,
+          publicReplyEnabled,
+          bridgeEnabled,
+          productTitle: name,
+          productPrice: productPrice || null,
+          productRating: productRating || null,
         }),
       });
       const json = await response.json();
@@ -101,6 +110,8 @@ export default function SchedulerPage() {
         setCaption("");
         setWhen("");
         setDestinationUrl("");
+        setProductPrice("");
+        setProductRating("");
         await load();
       }
     } finally {
@@ -212,6 +223,48 @@ export default function SchedulerPage() {
             onChange={(e) => setDmMessage(e.target.value)}
           />
         </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={publicReplyEnabled}
+              onChange={(e) => setPublicReplyEnabled(e.target.checked)}
+            />
+            Reply publicly under matching comments
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={bridgeEnabled}
+              onChange={(e) => setBridgeEnabled(e.target.checked)}
+            />
+            Use /p/ product bridge page (Amazon DM safe)
+          </label>
+        </div>
+
+        {bridgeEnabled ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="price">Product price (optional, e.g. Rs 429)</Label>
+              <Input
+                id="price"
+                placeholder="Rs 429"
+                value={productPrice}
+                onChange={(e) => setProductPrice(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="rating">Rating (optional, e.g. 4.0 · 2,500+ reviews)</Label>
+              <Input
+                id="rating"
+                placeholder="4.0 · 2,500+ reviews"
+                value={productRating}
+                onChange={(e) => setProductRating(e.target.value)}
+              />
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex items-center gap-3">
           <Button type="submit" disabled={saving}>

@@ -42,13 +42,15 @@ export interface CreateReelContainerInput {
   videoUrl: string;
   caption: string;
   shareToFeed?: boolean;
+  /** Optional IG professional account ID; skips /me/assigned_instagram_accounts lookup when supplied. */
+  instagramId?: string;
 }
 
 export async function createReelContainer(
   input: CreateReelContainerInput,
   fetchImpl: typeof fetch = fetch
 ): Promise<string> {
-  const igId = await resolveInstagramAccountId(input.accessToken);
+  const igId = input.instagramId ?? (await resolveInstagramAccountId(input.accessToken));
   const params = new URLSearchParams({
     media_type: "REELS",
     video_url: input.videoUrl,
@@ -140,9 +142,10 @@ export async function waitForContainerReady(
 export async function publishContainer(
   accessToken: string,
   containerId: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  instagramId?: string
 ): Promise<string> {
-  const igId = await resolveInstagramAccountId(accessToken);
+  const igId = instagramId ?? (await resolveInstagramAccountId(accessToken));
   const params = new URLSearchParams({
     creation_id: containerId,
     access_token: accessToken,

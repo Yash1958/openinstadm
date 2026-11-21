@@ -22,6 +22,13 @@ const createSchema = z.object({
   dmMessage: z.string().min(1).max(1000),
   destinationUrl: z.string().url(),
   linkButtonLabel: z.string().min(1).max(20).default("Open link"),
+  publicReplyEnabled: z.boolean().default(true),
+  publicReplyMessages: z.array(z.string().min(1).max(300)).max(10).default([]),
+  bridgeEnabled: z.boolean().default(true),
+  productTitle: z.string().max(150).optional().nullable(),
+  productPrice: z.string().max(40).optional().nullable(),
+  productRating: z.string().max(40).optional().nullable(),
+  productImageUrl: z.string().url().optional().nullable().or(z.literal("")),
 });
 
 async function requireContext() {
@@ -118,6 +125,10 @@ export async function POST(request: NextRequest) {
   const created = await prisma.scheduledReel.create({
     data: {
       ...parsed.data,
+      productImageUrl: parsed.data.productImageUrl || null,
+      productTitle: parsed.data.productTitle || null,
+      productPrice: parsed.data.productPrice || null,
+      productRating: parsed.data.productRating || null,
       scheduledAt,
       keyword: parsed.data.keyword.toUpperCase(),
       workspaceId,

@@ -450,6 +450,7 @@ describe("DM Worker — Full Pipeline", () => {
             slug: true,
             label: true,
             destinationUrl: true,
+            bridgeEnabled: true,
           },
           orderBy: { createdAt: "asc" },
         },

@@ -9,8 +9,14 @@ import {
 import { deleteReelObject, getSignedReelUrl } from "@/lib/storage/r2";
 import { generateReportShareSlug } from "@/lib/reports/share";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
-import { invalidateCampaignsCache } from "@/lib/server/automations";
-import { invalidateWorkspaceStats } from "@/lib/server/stats";
+
+// Default public comment replies used when publicReplyEnabled is true and no
+// custom variations were supplied. Rotated randomly per comment to look natural.
+const DEFAULT_PUBLIC_REPLIES = [
+  "Sent! Check your DMs 💌",
+  "Just DM'd you the link! ✨",
+  "Check your inbox — sent the link!",
+];
 
 // A reel that has sat in PUBLISHING longer than this was interrupted (worker
 // restart, crash). We never retry it automatically: the video may already be
@@ -47,10 +53,24 @@ async function createCampaignForReel(
     dmMessage: string;
     destinationUrl: string;
     linkButtonLabel: string;
+    publicReplyEnabled?: boolean;
+    publicReplyMessages?: string[];
+    bridgeEnabled?: boolean;
+    productTitle?: string | null;
+    productPrice?: string | null;
+    productRating?: string | null;
+    productImageUrl?: string | null;
   },
   mediaId: string,
   permalink: string | null
 ): Promise<string> {
+  const publicReplyEnabled = reel.publicReplyEnabled ?? true;
+  const publicReplyMessages = publicReplyEnabled
+    ? (reel.publicReplyMessages && reel.publicReplyMessages.length > 0
+        ? reel.publicReplyMessages
+        : DEFAULT_PUBLIC_REPLIES)
+    : [];
+
   const automation = await prisma.automation.create({
     data: {
       name: reel.name,
@@ -62,6 +82,9 @@ async function createCampaignForReel(
       matchAnyWord: false,
       dmMessage: reel.dmMessage,
       linkButtonLabel: reel.linkButtonLabel,
+      publicReplyEnabled,
+      publicReplyMessage: publicReplyMessages[0] ?? null,
+      publicReplyMessages,
       isActive: true,
       wholeWordMatch: true,
       workspaceId: reel.workspaceId,
@@ -74,14 +97,17 @@ async function createCampaignForReel(
             slug: generateTrackedLinkSlug(),
             label: "Primary campaign link",
             destinationUrl: reel.destinationUrl,
+            bridgeEnabled: reel.bridgeEnabled ?? true,
+            productTitle: reel.productTitle ?? reel.name,
+            productPrice: reel.productPrice ?? null,
+            productRating: reel.productRating ?? null,
+            productImageUrl: reel.productImageUrl ?? null,
           },
         ],
       },
     },
     select: { id: true },
   });
-  invalidateWorkspaceStats(reel.workspaceId);
-  invalidateCampaignsCache(reel.workspaceId);
   return automation.id;
 }
 
@@ -107,6 +133,7 @@ export async function publishScheduledReel(reelId: string): Promise<"published" 
       accessToken: token,
       videoUrl,
       caption: reel.caption,
+      instagramId: reel.instagramAccount.instagramId,
     });
     await prisma.scheduledReel.update({
       where: { id: reel.id },
@@ -114,7 +141,12 @@ export async function publishScheduledReel(reelId: string): Promise<"published" 
     });
 
     await waitForContainerReady(token, containerId);
-    const mediaId = await publishContainer(token, containerId);
+    const mediaId = await publishContainer(
+      token,
+      containerId,
+      fetch,
+      reel.instagramAccount.instagramId
+    );
     // From here on the reel is live. Record that before anything else can fail.
     await prisma.scheduledReel.update({
       where: { id: reel.id },
