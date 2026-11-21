@@ -8,12 +8,8 @@ const globalForPrisma = globalThis as unknown as {
 function normalizeDatabaseUrl(raw: string): string {
   try {
     const u = new URL(raw);
-    if (
-      u.hostname.endsWith(".supabase.com") &&
-      u.searchParams.get("sslmode") === "require" &&
-      !u.searchParams.has("uselibpqcompat")
-    ) {
-      u.searchParams.set("uselibpqcompat", "true");
+    if (u.hostname.endsWith(".supabase.com")) {
+      u.searchParams.set("sslmode", "no-verify");
       return u.toString();
     }
   } catch {
