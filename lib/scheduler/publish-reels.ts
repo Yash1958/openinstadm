@@ -4,6 +4,7 @@ import {
   createReelContainer,
   getContainerStatus,
   getMediaPermalink,
+  postFirstComment,
   publishContainer,
   waitForContainerReady,
 } from "@/lib/meta/publish";
@@ -18,6 +19,18 @@ const DEFAULT_PUBLIC_REPLIES = [
   "Just DM'd you the link! ✨",
   "Check your inbox — sent the link!",
 ];
+
+function buildFirstComment(keyword: string, seed: string): string {
+  const kw = keyword.trim().toUpperCase() || "LINK";
+  const templates = [
+    `Comment ${kw} and I'll DM you the direct link right away!`,
+    `Drop ${kw} below and I'll send the link straight to your DMs.`,
+    `Type ${kw} here and check your DMs for the direct link!`,
+  ];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return templates[hash % templates.length];
+}
 
 // A reel that has sat in PUBLISHING longer than this was interrupted (worker
 // restart, crash). We never retry it automatically: the video may already be
@@ -167,6 +180,14 @@ export async function publishScheduledReel(reelId: string): Promise<"published" 
       automationId = await createCampaignForReel(reel, mediaId, permalink);
     } catch (error) {
       followUpError = `Posted, but the campaign was not created: ${errorMessage(error)}`;
+    }
+
+    if (automationId) {
+      try {
+        await postFirstComment(token, mediaId, buildFirstComment(reel.keyword, mediaId));
+      } catch (error) {
+        console.warn("[scheduler] could not post auto first comment", mediaId, errorMessage(error));
+      }
     }
 
     try {
@@ -375,6 +396,14 @@ async function finalizeContainerIfReady(reel: {
       automationId = await createCampaignForReel(reel, mediaId, permalink);
     } catch (error) {
       followUpError = `Posted, but the campaign was not created: ${errorMessage(error)}`;
+    }
+
+    if (automationId) {
+      try {
+        await postFirstComment(token, mediaId, buildFirstComment(reel.keyword, mediaId));
+      } catch (error) {
+        console.warn("[scheduler] could not post auto first comment", mediaId, errorMessage(error));
+      }
     }
 
     try {

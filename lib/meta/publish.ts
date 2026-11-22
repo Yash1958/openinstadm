@@ -171,3 +171,30 @@ export async function getMediaPermalink(
   const body = await graphRequest<{ permalink?: string }>(url, undefined, fetchImpl);
   return body.permalink ?? null;
 }
+
+/**
+ * Posts a top-level comment on a published IG media item via the official
+ * Graph API (`instagram_manage_comments`). Used to seed an automatic CTA
+ * first comment right after a scheduled reel goes live.
+ */
+export async function postFirstComment(
+  accessToken: string,
+  mediaId: string,
+  message: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<string> {
+  const params = new URLSearchParams({
+    message,
+    access_token: accessToken,
+  });
+  const body = await graphRequest<{ id: string }>(
+    `${graphBase()}/${mediaId}/comments`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    },
+    fetchImpl
+  );
+  return body.id;
+}

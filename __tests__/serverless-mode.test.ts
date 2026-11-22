@@ -63,6 +63,7 @@ vi.mock("@/lib/meta/publish", () => ({
   waitForContainerReady: vi.fn(),
   publishContainer: mockPublishContainer,
   getMediaPermalink: mockGetMediaPermalink,
+  postFirstComment: vi.fn().mockResolvedValue("cmt-1"),
 }));
 
 import { processDueReelsServerless } from "@/lib/scheduler/publish-reels";

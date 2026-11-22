@@ -11,6 +11,7 @@ const {
   mockWaitForContainerReady,
   mockPublishContainer,
   mockGetMediaPermalink,
+  mockPostFirstComment,
   mockDecryptToken,
 } = vi.hoisted(() => ({
   mockUpdateMany: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockWaitForContainerReady: vi.fn(),
   mockPublishContainer: vi.fn(),
   mockGetMediaPermalink: vi.fn(),
+  mockPostFirstComment: vi.fn(),
   mockDecryptToken: vi.fn(),
 }));
 
@@ -55,6 +57,7 @@ vi.mock("@/lib/meta/publish", () => ({
   waitForContainerReady: mockWaitForContainerReady,
   publishContainer: mockPublishContainer,
   getMediaPermalink: mockGetMediaPermalink,
+  postFirstComment: mockPostFirstComment,
 }));
 
 import { publishScheduledReel } from "@/lib/scheduler/publish-reels";
@@ -133,6 +136,12 @@ describe("publishScheduledReel (standalone worker safety)", () => {
           },
         }),
       })
+    );
+
+    expect(mockPostFirstComment).toHaveBeenCalledWith(
+      "plain-token",
+      "media-456",
+      expect.stringContaining("LINK")
     );
 
     const finalCall = mockScheduledUpdate.mock.calls.at(-1)?.[0];
