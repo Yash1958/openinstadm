@@ -1,26 +1,36 @@
+import { Suspense } from "react";
+import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import { getStorefrontData } from "@/lib/store/query";
 import { StorefrontView } from "@/components/store/storefront-view";
-
-export const dynamic = "force-dynamic";
 
 type StoreUserProps = {
   params: Promise<{ username: string }>;
 };
 
-export async function generateMetadata({ params }: StoreUserProps) {
-  const { username } = await params;
-  const data = await getStorefrontData(username);
-  if (!data) return { title: "Shop Curated Finds" };
-  return {
-    title: `Shop Looks · @${data.username}`,
-    description: `Curated finds by @${data.username}.`,
-  };
-}
+export const metadata = {
+  title: "Shop Curated Looks",
+  description: "Curated Amazon fashion finds.",
+};
 
-export default async function UserStorePage({ params }: StoreUserProps) {
+async function UserStoreContent({ params }: StoreUserProps) {
+  await connection();
   const { username } = await params;
   const data = await getStorefrontData(username);
   if (!data) notFound();
   return <StorefrontView data={data} />;
+}
+
+export default function UserStorePage({ params }: StoreUserProps) {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-dvh bg-[#FAF7F2] flex items-center justify-center text-sm text-[#7A716A]">
+          Loading looks…
+        </main>
+      }
+    >
+      <UserStoreContent params={params} />
+    </Suspense>
+  );
 }
